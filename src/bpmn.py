@@ -39,11 +39,15 @@ class CamundaRESTInteraction(object):
         else:
             return data
 
-    def request_get_body(self, body, request=""):
+    def request_get_body(self, query_body, request=""):
         """Makes a GET request with body content as a dict"""
+        query_list = ["=".join([key, query_body[key]]) for key in query_body]
+        query = "&".join(query_list)
+        query = "?" + query
         # pylint: disable=unused-variable
-        resp, out_body = self.connection.request(self.engine_url + request,
-                                                 body=self.encoder.encode(body))
+        resp, out_body = self.connection.request(self.engine_url
+                                                 + request
+                                                 + query)
         # pylint: enable=unused-variable
         try:
             data = self.decoder.decode(out_body)
@@ -71,7 +75,7 @@ class CamundaRESTInteraction(object):
 
 class ExternalTask(CamundaRESTInteraction):
     """A class for working with external tasks"""
-    def __init__(self, topic="", worker_id="id"):
+    def __init__(self, topic, worker_id="id"):
         self.super = super(ExternalTask, self)
         self.super.__init__()
         self.super.certify()
@@ -105,7 +109,7 @@ class ExternalTask(CamundaRESTInteraction):
         return self.super.request_post(req_body,
                                        request="external-task/fetchAndLock")
 
-    def complete(self, task_id, variables=()):
+    def complete(self, task_id, variables=""):
         """Completes the task given by #task_id with #variables"""
         req_body = {"workerId":self.worker_id,
                     "variables":variables}
@@ -121,6 +125,18 @@ class ExternalTask(CamundaRESTInteraction):
                                        request="external-task/{}/extendLock"
                                        .format(task_id))
 
+
+class MessageTask(ExternalTask):
+    """Extension of the External Task to send messages to the BPMN engine"""
+    def __init__(self, topic, worker_id=""):
+        super(MessageTask, self).__init__(topic, worker_id)
+        self.super = super(MessageTask, self)
+
+    def send_message(self, message_name, correlation_keys=""):
+        """Sends a BPMN message to the BPMN engine"""
+        req_body = {"messageName":message_name,
+                    "correlationKeys":correlation_keys}
+        return self.super.request_post(req_body, request="message")
 
 if __name__ == "__main__":
     # pylint: disable=invalid-name
