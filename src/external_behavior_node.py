@@ -17,7 +17,6 @@ class BehaviorNode(ExternalTask):
     """This is the base behavior node class"""
     def __init__(self, behavior):
         super(BehaviorNode, self).__init__(topic=behavior, worker_id=behavior)
-        self.super = super(BehaviorNode, self)
 
         rospy.init_node(behavior)
         self.rate = RATE
@@ -48,12 +47,12 @@ class BehaviorNode(ExternalTask):
 
             self.variables = {}
             self.encoder = encoder
-            for i in xrange(len(variables)/2):
+            for i in xrange(len(variables)//2):
                 self.variables[variables[2*i]] = {"value":variables[2*i + 1],
                                                   "type":"String"}
 
         def __str__(self):
-            return self.encoder.encode(self.variables)
+            return self.encoder.encode([self.variables])
 
     def command_cb(self, command_msg):
         """The callback for when a command_msg is received.
@@ -65,9 +64,9 @@ class BehaviorNode(ExternalTask):
         command = command_msg.data.split()
         if command[0].lower() == self.behavior.lower():
             try:
-                self.options[command[1].lower](command[2:])
+                self.options[command[1].lower()](command[2:])
             except IndexError:
-                self.options[command[1].lower]()
+                self.options[command[1].lower()]()
             except KeyError:
                 self.status_pub.publish(INVALID_COMMAND
                                         .format(command[1], command[0]))
@@ -76,11 +75,11 @@ class BehaviorNode(ExternalTask):
         """Completes the current task"""
         if self.busy:
             if variables:
-                self.super.complete(self.curr_task[u"id"],
-                                    str(self.Variables(variables,
-                                                       self.encoder)))
+                super(BehaviorNode, self)\
+                    .complete(self.curr_task[u"id"],
+                              str(self.Variables(variables, self.encoder)))
             else:
-                self.super.complete(self.curr_task[u"id"])
+                super(BehaviorNode, self).complete(self.curr_task[u"id"])
             self.status_pub.publish(COMPLETE.format(self.behavior))
             self.curr_task = None
             self.busy = False
@@ -89,21 +88,22 @@ class BehaviorNode(ExternalTask):
         """Cancels(Completes by default) the current task"""
         self.complete(variables)
 
-
     def poll_tasks(self):
         """Gets the list of tasks for this behavior"""
-        return self.super.get_list()
+        return super(BehaviorNode, self).get_list()
 
     def new_task(self, tasks):
         """Checks if there is a new/not serviced task"""
         # If curr_task is null and tasks is not empty,
         # or if tasks is of length 2 or greater
         # then there is a new task
-        return bool((not self.curr_task and tasks) or len(tasks) > 1)
+        return bool((not self.curr_task and tasks)
+                    or (tasks and len(tasks) > 1))
 
     def get_task(self):
         """Gets a task to complete"""
-        return self.super.fetch_and_lock(lock_duration=(1./self.rate * 1500.))
+        return super(BehaviorNode, self)\
+                   .fetch_and_lock(lock_duration=(1./self.rate * 1500.))
 
     def curr_task_canceled(self, tasks):
         """Checks if the task is cancelled"""
@@ -129,7 +129,7 @@ class BehaviorNode(ExternalTask):
             tasks = self.poll_tasks()
 
             if self.new_task(tasks) and not self.busy:
-                self.curr_task = self.get_task()
+                self.curr_task = self.get_task()[0]
                 self.busy = True
                 self.status_pub.publish(START.format(self.behavior))
             elif self.curr_task_canceled(tasks):
@@ -146,4 +146,4 @@ class BehaviorNode(ExternalTask):
 
 
 if __name__ == "__main__":
-    BehaviorNode("Evacuate").run()
+    BehaviorNode(u"Evacuate").run()

@@ -76,28 +76,29 @@ class CamundaRESTInteraction(object):
 class ExternalTask(CamundaRESTInteraction):
     """A class for working with external tasks"""
     def __init__(self, topic, worker_id="id"):
-        self.super = super(ExternalTask, self)
-        self.super.__init__()
-        self.super.certify()
+        super(ExternalTask, self).__init__()
+        super(ExternalTask, self).certify()
         self.topic = topic
         self.worker_id = worker_id
 
     def get_list(self):
         """Get the list of tasks available on the topic"""
         if self.topic == "":
-            out = self.super.request_get("external-task")
+            out = super(ExternalTask, self).request_get("external-task")
         else:
-            out = self.super.request_get_body({"topicName":self.topic},
-                                              request="external-task")
+            out = super(ExternalTask, self)\
+                      .request_get_body({"topicName":self.topic},
+                                        request="external-task")
         return out
 
     def get_count(self):
         """Get the number of tasks available on the topic"""
         if self.topic == "":
-            out = self.super.request_get("external-task/count")
+            out = super(ExternalTask, self).request_get("external-task/count")
         else:
-            out = self.super.request_get_body({"topicName":self.topic},
-                                              request="external-task/count")
+            out = super(ExternalTask, self)\
+                      .request_get_body({"topicName":self.topic},
+                                        request="external-task/count")
         return out
 
     def fetch_and_lock(self, max_tasks=1, lock_duration=1000):
@@ -106,37 +107,41 @@ class ExternalTask(CamundaRESTInteraction):
         req_body = {"workerId":self.worker_id,
                     "maxTasks":max_tasks,
                     "topics":topics}
-        return self.super.request_post(req_body,
-                                       request="external-task/fetchAndLock")
+        return super(ExternalTask, self)\
+                   .request_post(req_body, request="external-task/fetchAndLock")
 
-    def complete(self, task_id, variables=""):
+    def complete(self, task_id, variables=None):
         """Completes the task given by #task_id with #variables"""
-        req_body = {"workerId":self.worker_id,
-                    "variables":variables}
-        return self.super.request_post(req_body,
-                                       request="external-task/{}/complete"
-                                       .format(task_id))
+        req_body = {"workerId":self.worker_id}
+        if variables:
+            req_body["variables"] = variables
+        return super(ExternalTask, self)\
+                   .request_post(req_body,
+                                 request="external-task/{}/complete"
+                                 .format(task_id))
 
     def extend_lock(self, task_id, new_duration=1000):
         """Extends the lock for task #task_id for #new_duration (msec)"""
         req_body = {"workerId":self.worker_id,
                     "newDuration":new_duration}
-        return self.super.request_post(req_body,
-                                       request="external-task/{}/extendLock"
-                                       .format(task_id))
+        return super(ExternalTask, self)\
+                   .request_post(req_body,
+                                 request="external-task/{}/extendLock"
+                                 .format(task_id))
 
 
 class MessageTask(ExternalTask):
     """Extension of the External Task to send messages to the BPMN engine"""
     def __init__(self, topic, worker_id=""):
         super(MessageTask, self).__init__(topic, worker_id)
-        self.super = super(MessageTask, self)
 
-    def send_message(self, message_name, correlation_keys=""):
+    def send_message(self, message_name, process_variables=None):#""):
         """Sends a BPMN message to the BPMN engine"""
-        req_body = {"messageName":message_name,
-                    "correlationKeys":correlation_keys}
-        return self.super.request_post(req_body, request="message")
+        req_body = {"messageName":message_name}
+        if process_variables:
+            req_body["processVariables"] = process_variables
+        return super(MessageTask, self)\
+                   .request_post(req_body, request="message")
 
 if __name__ == "__main__":
     # pylint: disable=invalid-name
