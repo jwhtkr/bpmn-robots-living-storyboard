@@ -5,7 +5,6 @@ from __future__ import print_function
 import json
 import httplib2
 
-
 ENGINE_URL = "http://localhost:8080/engine-rest/"
 JSON_HEADER = {"content-type":"application/json"}
 NAME = PASSWORD = "demo"
@@ -110,11 +109,11 @@ class ExternalTask(CamundaRESTInteraction):
         return super(ExternalTask, self)\
                    .request_post(req_body, request="external-task/fetchAndLock")
 
-    def complete(self, task_id, variables=None):
-        """Completes the task given by #task_id with #variables"""
+    def complete(self, task_id, variables_json=None):
+        """Completes the task given by #task_id with #variables_json"""
         req_body = {"workerId":self.worker_id}
-        if variables:
-            req_body["variables"] = variables
+        if variables_json:
+            req_body["variables"] = variables_json
         return super(ExternalTask, self)\
                    .request_post(req_body,
                                  request="external-task/{}/complete"
@@ -129,19 +128,48 @@ class ExternalTask(CamundaRESTInteraction):
                                  request="external-task/{}/extendLock"
                                  .format(task_id))
 
+    def bpmn_error(self, task_id, message=None, variables_json=None):
+        """Throws a BPMN error with optional message and variables"""
+        req_body = {"workerId":self.worker_id}
+        if message:
+            req_body["errorMessage"] = message
+        if variables_json:
+            req_body["variables"] = variables_json
+        return super(ExternalTask, self)\
+                   .request_post(req_body,
+                                 request="external-task/{}/bpmnError"
+                                 .format(task_id))
+
 
 class MessageTask(ExternalTask):
     """Extension of the External Task to send messages to the BPMN engine"""
     def __init__(self, topic, worker_id=""):
         super(MessageTask, self).__init__(topic, worker_id)
 
-    def send_message(self, message_name, process_variables=None):#""):
+    def send_message(self, message_name, process_variables_json=None):#""):
         """Sends a BPMN message to the BPMN engine"""
         req_body = {"messageName":message_name}
-        if process_variables:
-            req_body["processVariables"] = process_variables
+        if process_variables_json:
+            req_body["processVariables"] = process_variables_json
         return super(MessageTask, self)\
                    .request_post(req_body, request="message")
+
+
+class Signal(CamundaRESTInteraction):
+    """Class that can throw a signal"""
+    def __init__(self, name):
+        super(Signal, self).__init__()
+        super(Signal, self).certify()
+        self.name = name
+
+    def throw(self, variables_json=None):
+        """Throws a signal to the BPMN engine"""
+        req_body = {"name":self.name}
+        if variables_json:
+            req_body["variables"] = variables_json
+        return super(Signal, self)\
+                   .request_post(req_body, request="signal")
+
 
 if __name__ == "__main__":
     # pylint: disable=invalid-name

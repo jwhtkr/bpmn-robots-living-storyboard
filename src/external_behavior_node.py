@@ -1,17 +1,56 @@
-#!../venv/bin/python
+#!/usr/bin/env python
 """This module contains the base ROS node class that acts as a behavior node"""
 
 from __future__ import division
 
+import argparse
+
 import rospy
 from std_msgs.msg import String
-from bpmn import ExternalTask
 
-COMPLETE = "Completed {} Behavior!"
-CANCEL = "{} Behavior was canceled."
-START = "{} Behavior was started!"
+from bpmn import ExternalTask, Signal
+
+COMPLETE = "Completed {} behavior!"
+CANCEL = "{} behavior was canceled."
+START = "{} behavior was started!"
+COMMAND_ATTEMPT = "Attempting to perform the {} command with variables: {}."
+COMMAND_FAILED = "The {} command failed because {}."
 INVALID_COMMAND = "{} is an invalid command for the {} behavior."
+ERROR = "{} behavior threw a BPMN error with message: {}."
+SIGNAL = "{} behavior sent a {} signal."
 RATE = 1
+
+
+class CommandFailedError(Exception):
+    """An exception to indicate that a command failed"""
+    pass
+
+
+class Variables(object):
+    """This converts to the BPMN engine's expected variable format"""
+    def __init__(self, variables, encoder):
+        """Initialize with a list of name, key, type tuples
+
+        These name/key/type tuples must be separate elements, but also adjacent
+        in the list, therefore the list must have a multiple of three elements
+        that it contains.
+        """
+        num_elem = 3
+        if len(variables) % num_elem:
+            raise TypeError("The Variables class cannot be instantiated with a "
+                            + "number of elements in the variables list that "
+                            + "is not a multiple of {}".format(num_elem))
+
+        self.variables = {}
+        self.encoder = encoder
+        for i in xrange(len(variables)//num_elem):
+            self.variables[variables[num_elem*i]] =\
+                {"value":variables[num_elem*i + 1],
+                 "type":variables[num_elem*i + 2]}
+
+    def __str__(self):
+        return self.encoder.encode(self.variables)
+
 
 class BehaviorNode(ExternalTask):
     """This is the base behavior node class"""
@@ -28,31 +67,9 @@ class BehaviorNode(ExternalTask):
         self.busy = False
         self.behavior = behavior
         self.options = {"complete":self.complete,
-                        "cancel":self.cancel}
-
-
-    class Variables(object):
-        """This converts to the BPMN engine's expected variable format"""
-        def __init__(self, variables, encoder):
-            """Initialize with a list of variable_name, variable_key pairs
-
-            These name/key pairs must be separate elements, but also adjacent in
-            the list, therefore the list must be even in the number of elements
-            it contains. For now this class treats all variables as type string.
-            """
-            if len(variables) % 2:
-                raise TypeError("The Variables class cannot be instantiated "
-                                + "with an odd number of elements in the "
-                                + "variables list")
-
-            self.variables = {}
-            self.encoder = encoder
-            for i in xrange(len(variables)//2):
-                self.variables[variables[2*i]] = {"value":variables[2*i + 1],
-                                                  "type":"String"}
-
-        def __str__(self):
-            return self.encoder.encode([self.variables])
+                        "cancel":self.cancel,
+                        "error":self.error,
+                        "sendsignal":self.send_signal}
 
     def command_cb(self, command_msg):
         """The callback for when a command_msg is received.
@@ -62,14 +79,21 @@ class BehaviorNode(ExternalTask):
         using the self.options dict
         """
         command = command_msg.data.split()
-        if command[0].lower() == self.behavior.lower():
-            try:
-                self.options[command[1].lower()](command[2:])
-            except IndexError:
-                self.options[command[1].lower()]()
-            except KeyError:
-                self.status_pub.publish(INVALID_COMMAND
-                                        .format(command[1], command[0]))
+        if command:
+            if command[0].lower() == self.behavior.lower():
+                self.status_pub.publish(COMMAND_ATTEMPT
+                                        .format(command[1], command[2:]))
+                try:
+                    self.options[command[1].lower()](command[2:])
+                except IndexError:
+                    self.options[command[1].lower()]()
+                except KeyError:
+                    self.status_pub.publish(INVALID_COMMAND
+                                            .format(command[1], command[0]))
+                except CommandFailedError as ex:
+                    self.status_pub.publish(COMMAND_FAILED
+                                            .format(command[1], str(ex)))
+
 
     def complete(self, variables=()):
         """Completes the current task"""
@@ -77,16 +101,53 @@ class BehaviorNode(ExternalTask):
             if variables:
                 super(BehaviorNode, self)\
                     .complete(self.curr_task[u"id"],
-                              str(self.Variables(variables, self.encoder)))
+                              Variables(variables, self.encoder).variables)
             else:
                 super(BehaviorNode, self).complete(self.curr_task[u"id"])
             self.status_pub.publish(COMPLETE.format(self.behavior))
-            self.curr_task = None
-            self.busy = False
+        else:
+            raise CommandFailedError("there is no task to complete")
 
     def cancel(self, variables=()):
         """Cancels(Completes by default) the current task"""
         self.complete(variables)
+
+    def error(self, variables=()):
+        """Throws a BPMN error"""
+        if not variables:
+            raise CommandFailedError("there is no message for the error")
+        message = variables[0]
+        variables = variables[1:]
+        if self.busy:
+            if variables:
+                super(BehaviorNode, self)\
+                    .bpmn_error(self.curr_task[u"id"],
+                                message,
+                                Variables(variables, self.encoder).variables)
+            else:
+                super(BehaviorNode, self).bpmn_error(self.curr_task[u"id"],
+                                                     message)
+            self.status_pub.publish(ERROR.format(self.behavior, message))
+        else:
+            raise CommandFailedError("this behavior is not active and can't "
+                                     + "throw an error")
+
+    def send_signal(self, variables=()):
+        """Sends a BPMN Signal with optional variables"""
+        if not variables:
+            raise CommandFailedError("No Signal name specified to raise")
+        name = variables[0]
+        variables = variables[1:]
+        if self.busy:
+            signal = Signal(name)
+            if variables:
+                signal.throw(Variables(variables, self.encoder).variables)
+            else:
+                signal.throw()
+            self.status_pub.publish(SIGNAL.format(self.behavior, name))
+        else:
+            raise CommandFailedError("this behavior is not active and can't "
+                                     + "send a signal")
 
     def poll_tasks(self):
         """Gets the list of tasks for this behavior"""
@@ -129,10 +190,12 @@ class BehaviorNode(ExternalTask):
             tasks = self.poll_tasks()
 
             if self.new_task(tasks) and not self.busy:
-                self.curr_task = self.get_task()[0]
-                self.busy = True
-                self.status_pub.publish(START.format(self.behavior))
-            elif self.curr_task_canceled(tasks):
+                self.curr_task = self.get_task()
+                if self.curr_task:
+                    self.curr_task = self.curr_task[0]
+                    self.busy = True
+                    self.status_pub.publish(START.format(self.behavior))
+            if self.curr_task_canceled(tasks):
                 self.curr_task = None
                 self.busy = False
                 self.status_pub.publish(CANCEL.format(self.behavior))
@@ -144,6 +207,12 @@ class BehaviorNode(ExternalTask):
             self.ros_rate.sleep()
 
 
-
 if __name__ == "__main__":
-    BehaviorNode(u"Evacuate").run()
+    # pylint: disable=invalid-name
+    import sys
+    myargv = rospy.myargv(sys.argv)[1:]
+    parser = argparse.ArgumentParser()
+    parser.add_argument("topic",
+                        help="The BPMN topic corresponding to this node")
+    args = parser.parse_args(myargv)
+    BehaviorNode(args.topic).run()
