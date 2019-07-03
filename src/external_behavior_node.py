@@ -3,8 +3,6 @@
 
 from __future__ import division
 
-import argparse
-
 import rospy
 from std_msgs.msg import String
 
@@ -210,6 +208,7 @@ class BehaviorNode(ExternalTask):
 if __name__ == "__main__":
     # pylint: disable=invalid-name
     import sys
+    import argparse
     myargv = rospy.myargv(sys.argv)[1:]
     parser = argparse.ArgumentParser()
     parser.add_argument("topic",
