@@ -35,6 +35,7 @@ private:
     web::http::client::http_client m_client;
     const std::string m_worker_id;
     const std::string m_behavior;
+    const std::string m_behavior_lower;
     const std::string m_uri;
     // const std::unordered_map<std::string, std::function<void(ExternalBehavior*, std::vector<std::string>)>> m_options;
     bool m_is_busy;
@@ -48,17 +49,18 @@ public:
     ~ExternalBehavior() = default;
 
     void command_cb(const std_msgs::String::ConstPtr& command_msg);
+    void do_command(const std::string& command, std::vector<std::string>& variables);
+    void do_command(const std::string& command);
 
     const std::vector<web::json::value> poll_tasks();
-    const camunda::LockResponse get_task(const camunda::LockRequest request);
-    bool new_task(const std::vector<web::json::value> tasks);
-    bool curr_task_canceled(const std::vector<web::json::value> tasks);
+    const camunda::LockResponse get_task(const camunda::LockRequest& request);
+    bool new_task(const std::vector<web::json::value>& tasks);
+    bool curr_task_canceled(const std::vector<web::json::value>& tasks);
 
-    void complete(const camunda::Variables variables);
-    void cancel(const camunda::Variables variables);
-    void error(const camunda::Variables variables);
-    void send_signal(const camunda::Variables variables);
-    void send_message(const camunda::Variables variables);
+    void complete(const camunda::Variables& variables);
+    void error(const std::string& message, const camunda::Variables& variables);
+    void send_signal(const std::string& signal_name, const camunda::Variables& variables);
+    void send_message(const std::string& message_name, const camunda::Variables& variables);
 };
 
 
