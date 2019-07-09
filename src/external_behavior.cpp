@@ -88,7 +88,7 @@ void ExternalBehavior::do_command(const std::string& command, std::vector<std::s
     {
       std::cout << "In ExternalBehavior::do_command: " << e.what() << std::endl;
       std::cout << "Error, Signal, and Message commands must have a 3rd field before the variables." << std::endl;
-      std::cout << "This is an error message, or the name of the signal or message respectively" << std::endl;
+      std::cout << "This field is an error message, or the name of the signal or message (respectively)" << std::endl;
     }
 
   }
@@ -109,10 +109,7 @@ camunda::Variables variables_from_vector(std::vector<std::string>& variables)
   {
     for (size_t i = 0; i < variables.size(); i += 3)
     {
-      camunda::Variables tmp;
-      tmp["value"] = web::json::value(variables.at(i+1));
-      tmp["type"] = web::json::value(variables.at(i+2));
-      result[variables.at(i)] = tmp.getVariables();
+      result.addVariable(variables.at(i), variables.at(i+1), variables.at(i+2));
     }
   }
   catch (std::out_of_range& e)
@@ -215,6 +212,9 @@ void ExternalBehavior::complete(const camunda::Variables& variables)
 {
   std::cout << "Completing " << this->m_behavior << " with variables:" << std::endl;
   variables.print();
+
+  camunda::CompleteRequest complete_request(this->m_worker_id, variables);
+  (this->m_p_curr_task)->complete(complete_request);
 }
 
 void ExternalBehavior::error(const std::string& message, const camunda::Variables& variables)
@@ -227,13 +227,24 @@ void ExternalBehavior::send_signal(const std::string& signal_name, const camunda
 {
   std::cout << "Sending signal " << signal_name << " with variables:" << std::endl;
   variables.print();
+
+  camunda::ThrowSignal signal(signal_name, variables);
+  this->m_client.request(web::http::methods::POST, "signal", signal.getSignal()).wait();
 }
 
 void ExternalBehavior::send_message(const std::string& message_name, const camunda::Variables& variables)
 {
   std::cout << "Sending message " << message_name << " with variables:" << std::endl;
   variables.print();
+
+  camunda::Json message_json;
+  message_json.add("messageName", web::json::value(message_name));
+  message_json.add("processVariables", variables.cgetVariables());
+
+  this-m_client.request(web::http::methods::POST, "message", message_json.cget()).wait();
 }
+
+
 
 const std::string& ExternalBehavior::get_worker_id()
 {
@@ -242,7 +253,30 @@ const std::string& ExternalBehavior::get_worker_id()
 
 const camunda::Topics& ExternalBehavior::get_topics()
 {
+  if(!this->m_topics.is_safe())
+  {
+    std::cout << "problem" <<std::endl;
+  }
   return this->m_topics;
+}
+
+const std::unique_ptr<bpmn::TaskLock<>>& ExternalBehavior::get_curr_task_ptr()
+{
+  return this->m_p_curr_task;
+}
+
+
+
+void ExternalBehavior::set_curr_task(bpmn::TaskLock<>* task_ptr)
+{
+  if (task_ptr == nullptr)
+  {
+    this->m_p_curr_task.reset();
+  }
+  else
+  {
+    this->m_p_curr_task.reset(task_ptr);
+  }
 }
 
 int main(int argc, char** argv)
@@ -260,9 +294,10 @@ int main(int argc, char** argv)
     tasks = test.poll_tasks();
     if (tasks.size() > 0)
     {
-      bpmn::TaskLock<> task("http://localhost:8080/", test.get_worker_id(), test.get_topics());
-      std::cout << "Got task: " << task.getTaskId() << std::endl;
-      while (ros::ok() && !test.curr_task_canceled(task.getTaskId()))
+      test.set_curr_task(new bpmn::TaskLock<>("http://localhost:8080/", test.get_worker_id(), test.get_topics()));
+      std::cout << "Got task: " << test.get_curr_task_ptr()->getTaskId() << " with variables:" << std::endl;
+      camunda::Variables(test.get_curr_task_ptr()->getResponsVars()).print();
+      while (ros::ok() && !test.curr_task_canceled(test.get_curr_task_ptr()->getTaskId()))
       {
         ros::spinOnce();
         rate.sleep();
@@ -270,9 +305,15 @@ int main(int argc, char** argv)
 
       if (!ros::ok())
       {
-        std::cout << "Unlocking task: " << task.getTaskId() << std::endl;
-        task.unlock();
+        std::cout << "Unlocking task: " << test.get_curr_task_ptr()->getTaskId() << std::endl;
+        test.get_curr_task_ptr()->unlock();
+        test.set_curr_task(nullptr);
       }
+      else
+      {
+        test.set_curr_task(nullptr);
+      }
+
     }
     ros::spinOnce();
     rate.sleep();

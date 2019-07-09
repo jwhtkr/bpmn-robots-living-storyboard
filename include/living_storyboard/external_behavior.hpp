@@ -19,6 +19,8 @@ This is a ROS node class that provides just enough functionality to demo the BPM
 #include "camunda_objects/variables.hpp"
 #include "camunda_error_handling/bpmn_error.hpp"
 
+#include "task_lock/task_lock.hpp"
+
 #include "std_msgs/String.h"
 
 #include <cpprest/json.h>
@@ -40,7 +42,8 @@ private:
     const camunda::Topics m_topics;
     // const std::unordered_map<std::string, std::function<void(ExternalBehavior*, std::vector<std::string>)>> m_options;
     bool m_is_busy;
-    web::json::value m_curr_task;
+    std::unique_ptr<bpmn::TaskLock<>> m_p_curr_task;
+    // web::json::value m_curr_task;
 
 
 public:
@@ -68,6 +71,10 @@ public:
 
     const std::string& get_worker_id();
     const camunda::Topics& get_topics();
+    const std::unique_ptr<bpmn::TaskLock<>>& get_curr_task_ptr();
+
+
+    void set_curr_task(bpmn::TaskLock<>* task_ptr);
 };
 
 
