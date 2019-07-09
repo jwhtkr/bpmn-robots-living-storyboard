@@ -8,6 +8,7 @@ This is a ROS node class that provides just enough functionality to demo the BPM
 */
 
 #include "living_storyboard/external_behavior.hpp"
+#include "task_lock/task_lock.hpp"
 
 #include <algorithm>
 #include <boost/tokenizer.hpp>
@@ -18,12 +19,13 @@ std::string str_to_lower(std::string str);
 std::vector<std::string> split(std::string& str);
 camunda::Variables variables_from_vector(std::vector<std::string>& variables);
 
-ExternalBehavior::ExternalBehavior(const std::string& behavior, const std::string& uri)
+ExternalBehavior::ExternalBehavior(const std::string& behavior, const std::string& uri, const uint32_t lock_duration)
   : m_client(uri),
     m_worker_id(behavior),
     m_behavior(behavior),
     m_behavior_lower(str_to_lower(behavior)),
     m_uri(uri),
+    m_topics(behavior, lock_duration),
     m_is_busy(false)
 {}
 
@@ -144,42 +146,64 @@ std::vector<std::string> split(std::string& str)
 
 
 
-const std::vector<web::json::value> ExternalBehavior::poll_tasks()
+const web::json::value ExternalBehavior::poll_tasks()
 {
-  const std::vector<web::json::value> result;
+  std::stringstream ss;
+  ss << "external-task?topicName=" << this->m_behavior;
 
   web::http::http_response response;
-  web::json::value response_json;
+  response = this->m_client.request(web::http::methods::GET, ss.str()).get();
 
-  response = this->m_client.request(web::http::methods::GET, "external-task").get();
-  response_json = response.extract_json().get();
-
-
-  return result;
-}
-
-const camunda::LockResponse ExternalBehavior::get_task(const camunda::LockRequest& request)
-{
-  const camunda::LockResponse result;
-
+  const web::json::value result(response.extract_json().get());
+  // for (size_t i = 0; i < result.size(); i++)
+  // {
+  //   std::cout << i << ": " << result.at(i) << std::endl;
+  // }
 
 
   return result;
 }
 
-bool ExternalBehavior::new_task(const std::vector<web::json::value>& tasks)
+// const camunda::LockResponse ExternalBehavior::get_task(uint32_t lock_duration)
+// {
+//   camunda::LockRequest request(this->m_worker_id, 1);
+//   camunda::Topics topics()
+//   web::http::http_response response;
+
+//   request.addTopics()
+//   response = this->m_client.request(web::http::methods::POST, "external-task/fetchAndLock", request.cgetLockRequested()).get();
+//   const camunda::LockResponse result;
+
+//   return result;
+// }
+
+// bool ExternalBehavior::new_task(const std::vector<web::json::value>& tasks)
+// {
+//   bool result = false;
+
+
+
+//   return result;
+// }
+
+bool ExternalBehavior::curr_task_canceled(const web::json::value curr_task_id)
 {
-  bool result = false;
+  bool result = true;
 
+  web::json::value tasks = this->poll_tasks();
 
-
-  return result;
-}
-
-bool ExternalBehavior::curr_task_canceled(const std::vector<web::json::value>& tasks)
-{
-  bool result = false;
-
+  for (size_t i = 0; i < tasks.size(); i++)
+  {
+    web::json::value task = tasks[i];
+    if (task["id"] == curr_task_id)
+    {
+      result = false;
+    }
+  }
+  if (result)
+  {
+    std::cout << "Task Cancelled: " << curr_task_id << std::endl;
+  }
 
 
   return result;
@@ -211,12 +235,48 @@ void ExternalBehavior::send_message(const std::string& message_name, const camun
   variables.print();
 }
 
+const std::string& ExternalBehavior::get_worker_id()
+{
+  return this->m_worker_id;
+}
+
+const camunda::Topics& ExternalBehavior::get_topics()
+{
+  return this->m_topics;
+}
+
 int main(int argc, char** argv)
 {
   ros::init(argc, argv, "test_node");
   ros::NodeHandle nh;
-  ExternalBehavior test("behavior");
+  ros::Rate rate(10);
+  ExternalBehavior test("Message");
   ros::Subscriber sub = nh.subscribe<std_msgs::String>("commands", 1, &ExternalBehavior::command_cb, &test);
-  ros::spin();
+
+  web::json::value tasks;
+
+  while (ros::ok())
+  {
+    tasks = test.poll_tasks();
+    if (tasks.size() > 0)
+    {
+      bpmn::TaskLock<> task("http://localhost:8080/", test.get_worker_id(), test.get_topics());
+      std::cout << "Got task: " << task.getTaskId() << std::endl;
+      while (ros::ok() && !test.curr_task_canceled(task.getTaskId()))
+      {
+        ros::spinOnce();
+        rate.sleep();
+      }
+
+      if (!ros::ok())
+      {
+        std::cout << "Unlocking task: " << task.getTaskId() << std::endl;
+        task.unlock();
+      }
+    }
+    ros::spinOnce();
+    rate.sleep();
+  }
+
   return 0;
 }

@@ -14,6 +14,7 @@ find_package(catkin REQUIRED
     std_msgs
     camunda_objects
     camunda_error_handling
+    task_lock
 )
 
 ## System dependencies are found with CMake's conventions
@@ -115,6 +116,7 @@ catkin_package(
  CATKIN_DEPENDS
   camunda_objects
   camunda_error_handling
+  task_lock
 #   roscpp
 #   rospy
 #   stdmsg
