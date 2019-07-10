@@ -8,12 +8,12 @@ This is a ROS node class that provides just enough functionality to demo the BPM
 */
 
 #include "living_storyboard/external_behavior.hpp"
-#include "task_lock/task_lock.hpp"
 
 #include <algorithm>
 #include <boost/tokenizer.hpp>
 
 #include "ros/ros.h"
+#include "ros/console.h"
 
 std::string str_to_lower(std::string str);
 std::vector<std::string> split(std::string& str);
@@ -26,7 +26,8 @@ ExternalBehavior::ExternalBehavior(const std::string& behavior, const std::strin
     m_behavior_lower(str_to_lower(behavior)),
     m_uri(uri),
     m_topics(behavior, lock_duration),
-    m_is_busy(false)
+    m_is_busy(false),
+    m_error_handler(uri.substr(0, 22), behavior, behavior)
 {}
 
 void ExternalBehavior::command_cb(const std_msgs::String::ConstPtr& command_msg)
@@ -41,7 +42,7 @@ void ExternalBehavior::command_cb(const std_msgs::String::ConstPtr& command_msg)
     commands[1] = str_to_lower(commands[1]);
     if (commands[0] == this->m_behavior_lower)
     {
-      std::cout << "The command matched the behavior!" << std::endl;
+      // std::cout << "The command matched the behavior!" << std::endl;
 
       if (commands.size() > 2){
         std::vector<std::string> vars(commands.begin() + 2, commands.end());
@@ -64,7 +65,7 @@ void ExternalBehavior::do_command(const std::string& command, std::vector<std::s
     vars = variables_from_vector(variables);
     this->complete(vars);
   }
-  else
+  else if (command == "error" || command == "signal" || command == "message")
   {
     try
     {
@@ -86,12 +87,20 @@ void ExternalBehavior::do_command(const std::string& command, std::vector<std::s
     }
     catch (std::out_of_range& e)
     {
-      std::cout << "In ExternalBehavior::do_command: " << e.what() << std::endl;
-      std::cout << "Error, Signal, and Message commands must have a 3rd field before the variables." << std::endl;
-      std::cout << "This field is an error message, or the name of the signal or message (respectively)" << std::endl;
+      // std::cout << "In ExternalBehavior::do_command: " << e.what() << std::endl;
+      // std::cout << "Error, Signal, and Message commands must have a 3rd field before the variables." << std::endl;
+      // std::cout << "This field is an error message, or the name of the signal or message (respectively)." << std::endl;
+      ROS_WARN_STREAM("In ExternalBehavior::do_command: " << e.what());
+      ROS_WARN_STREAM("Error, Signal, and Message commands must have a 3rd field before the variables.");
+      ROS_WARN_STREAM("This field is an error message, or the name of the signal or message (respectively).");
     }
 
   }
+  else
+  {
+    ROS_WARN_STREAM("The command: " << command << " is an invalid command.");
+  }
+
 }
 
 void ExternalBehavior::do_command(const std::string& command)
@@ -114,8 +123,10 @@ camunda::Variables variables_from_vector(std::vector<std::string>& variables)
   }
   catch (std::out_of_range& e)
   {
-    std::cout << "In variables_from_vector: " << e.what() << std::endl;
-    std::cout << "Variables must be specified by [variable_name variable_value variable_type]" << std::endl;
+    // std::cout << "In variables_from_vector: " << e.what() << std::endl;
+    // std::cout << "Variables must be specified by [variable_name variable_value variable_type]" << std::endl;
+    ROS_WARN_STREAM("In variables_from_vector: " << e.what());
+    ROS_WARN_STREAM("Variables must be specified by [variable_name variable_value variable_type].");
   }
 
   return result;
@@ -199,7 +210,8 @@ bool ExternalBehavior::curr_task_canceled(const web::json::value curr_task_id)
   }
   if (result)
   {
-    std::cout << "Task Cancelled: " << curr_task_id << std::endl;
+    // std::cout << "Task Cancelled: " << curr_task_id << std::endl;
+    ROS_INFO_STREAM("Task canceled: " << curr_task_id);
   }
 
 
@@ -210,23 +222,30 @@ bool ExternalBehavior::curr_task_canceled(const web::json::value curr_task_id)
 
 void ExternalBehavior::complete(const camunda::Variables& variables)
 {
-  std::cout << "Completing " << this->m_behavior << " with variables:" << std::endl;
+  // std::cout << "Completing " << this->m_behavior << " with variables:" << std::endl;
   variables.print();
+  // ROS_INFO_STREAM("Completing " << this->m_behavior << " with variables:\n" << variables.cget().serialize());
 
   camunda::CompleteRequest complete_request(this->m_worker_id, variables);
+  complete_request.print();
   (this->m_p_curr_task)->complete(complete_request);
 }
 
 void ExternalBehavior::error(const std::string& message, const camunda::Variables& variables)
 {
-  std::cout << "Sending Error with message: " << message << " and variables:" << std::endl;
-  variables.print();
+  // std::cout << "Sending Error with message: " << message << " and variables:" << std::endl;
+  // variables.print();
+  ROS_INFO_STREAM("Sending Error with message: " << message << " and variables:\n" << variables.cget().serialize());
+
+  this->m_error_handler.addExternalTaskId(this->m_p_curr_task->getTaskId().as_string());
+  this->m_error_handler.throwBpmnError("error code", message, variables);
 }
 
 void ExternalBehavior::send_signal(const std::string& signal_name, const camunda::Variables& variables)
 {
-  std::cout << "Sending signal " << signal_name << " with variables:" << std::endl;
-  variables.print();
+  // std::cout << "Sending signal " << signal_name << " with variables:" << std::endl;
+  // variables.print();
+  ROS_INFO_STREAM("Sending signal " << signal_name << " with variables:\n" << variables.cget().serialize());
 
   camunda::ThrowSignal signal(signal_name, variables);
   this->m_client.request(web::http::methods::POST, "signal", signal.getSignal()).wait();
@@ -234,12 +253,13 @@ void ExternalBehavior::send_signal(const std::string& signal_name, const camunda
 
 void ExternalBehavior::send_message(const std::string& message_name, const camunda::Variables& variables)
 {
-  std::cout << "Sending message " << message_name << " with variables:" << std::endl;
-  variables.print();
+  // std::cout << "Sending message " << message_name << " with variables:" << std::endl;
+  // variables.print();
+  ROS_INFO_STREAM("Sending message " << message_name << " with variables:\n" << variables.cget().serialize());
 
   camunda::Json message_json;
   message_json.add("messageName", web::json::value(message_name));
-  message_json.add("processVariables", variables.cgetVariables());
+  message_json.add("processVariables", variables.cget());
 
   this-m_client.request(web::http::methods::POST, "message", message_json.cget()).wait();
 }
@@ -295,8 +315,12 @@ int main(int argc, char** argv)
     if (tasks.size() > 0)
     {
       test.set_curr_task(new bpmn::TaskLock<>("http://localhost:8080/", test.get_worker_id(), test.get_topics()));
-      std::cout << "Got task: " << test.get_curr_task_ptr()->getTaskId() << " with variables:" << std::endl;
-      camunda::Variables(test.get_curr_task_ptr()->getResponsVars()).print();
+      // std::cout << "Got task: " << test.get_curr_task_ptr()->getTaskId() << " with variables:" << std::endl;
+      // camunda::Variables(test.get_curr_task_ptr()->getResponsVars()).print();
+      ROS_INFO_STREAM("Got task: "
+                      << test.get_curr_task_ptr()->getTaskId().serialize()
+                      << " with variables:\n"
+                      << test.get_curr_task_ptr()->getResponsVars().serialize());
       while (ros::ok() && !test.curr_task_canceled(test.get_curr_task_ptr()->getTaskId()))
       {
         ros::spinOnce();
@@ -305,7 +329,8 @@ int main(int argc, char** argv)
 
       if (!ros::ok())
       {
-        std::cout << "Unlocking task: " << test.get_curr_task_ptr()->getTaskId() << std::endl;
+        // std::cout << "Unlocking task: " << test.get_curr_task_ptr()->getTaskId() << std::endl;
+        ROS_INFO_STREAM("Unlocking task: " << test.get_curr_task_ptr()->getTaskId().serialize());
         test.get_curr_task_ptr()->unlock();
         test.set_curr_task(nullptr);
       }

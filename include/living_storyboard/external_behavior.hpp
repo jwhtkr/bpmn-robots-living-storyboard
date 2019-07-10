@@ -20,6 +20,7 @@ This is a ROS node class that provides just enough functionality to demo the BPM
 #include "camunda_error_handling/bpmn_error.hpp"
 
 #include "task_lock/task_lock.hpp"
+#include "error_handler/error_handler.hpp"
 
 #include "std_msgs/String.h"
 
@@ -43,6 +44,7 @@ private:
     // const std::unordered_map<std::string, std::function<void(ExternalBehavior*, std::vector<std::string>)>> m_options;
     bool m_is_busy;
     std::unique_ptr<bpmn::TaskLock<>> m_p_curr_task;
+    bpmn::ErrorHandler<> m_error_handler;
     // web::json::value m_curr_task;
 
 
