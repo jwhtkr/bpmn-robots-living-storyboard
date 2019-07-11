@@ -172,28 +172,6 @@ const web::json::value ExternalBehavior::poll_tasks()
   return result;
 }
 
-// const camunda::LockResponse ExternalBehavior::get_task(uint32_t lock_duration)
-// {
-//   camunda::LockRequest request(this->m_worker_id, 1);
-//   camunda::Topics topics()
-//   web::http::http_response response;
-
-//   request.addTopics()
-//   response = this->m_client.request(web::http::methods::POST, "external-task/fetchAndLock", request.cgetLockRequested()).get();
-//   const camunda::LockResponse result;
-
-//   return result;
-// }
-
-// bool ExternalBehavior::new_task(const std::vector<web::json::value>& tasks)
-// {
-//   bool result = false;
-
-
-
-//   return result;
-// }
-
 bool ExternalBehavior::curr_task_canceled(const web::json::value curr_task_id)
 {
   bool result = true;
@@ -223,11 +201,11 @@ bool ExternalBehavior::curr_task_canceled(const web::json::value curr_task_id)
 void ExternalBehavior::complete(const camunda::Variables& variables)
 {
   // std::cout << "Completing " << this->m_behavior << " with variables:" << std::endl;
-  variables.print();
-  // ROS_INFO_STREAM("Completing " << this->m_behavior << " with variables:\n" << variables.cget().serialize());
+  // variables.print();
+  ROS_INFO_STREAM("Completing " << this->m_behavior << " with variables:\n" << variables.cget().serialize());
 
   camunda::CompleteRequest complete_request(this->m_worker_id, variables);
-  complete_request.print();
+  // complete_request.print();
   (this->m_p_curr_task)->complete(complete_request);
 }
 
@@ -289,22 +267,53 @@ const std::unique_ptr<bpmn::TaskLock<>>& ExternalBehavior::get_curr_task_ptr()
 
 void ExternalBehavior::set_curr_task(bpmn::TaskLock<>* task_ptr)
 {
-  if (task_ptr == nullptr)
+  try
   {
-    this->m_p_curr_task.reset();
+    if (task_ptr == nullptr)
+    {
+      this->m_p_curr_task->complete();
+      this->m_p_curr_task.reset();
+    }
+    else
+    {
+      this->m_p_curr_task.reset(task_ptr);
+    }
   }
-  else
+  catch (const std::exception& e)
   {
-    this->m_p_curr_task.reset(task_ptr);
+    ROS_WARN_STREAM("ExternalBehavior::set_curr_task error: " << e.what());
   }
 }
+
+
 
 int main(int argc, char** argv)
 {
   ros::init(argc, argv, "test_node");
+  std::string topic_name;
+
+  if (argc == 2)
+  {
+    topic_name = argv[1];
+  }
+  else
+  {
+    ROS_ERROR_STREAM("Only enter the name of the Topic as a single string as an argument for this node.");
+    std::stringstream ss("Arguments were: ");
+    for (size_t i = 0; i < argc; i++)
+    {
+      ss << argv[i];
+    }
+    ROS_ERROR_STREAM(ss.str());
+
+    return 0;
+  }
+
+
+
   ros::NodeHandle nh;
   ros::Rate rate(10);
-  ExternalBehavior test("Message");
+  ExternalBehavior test(topic_name);
   ros::Subscriber sub = nh.subscribe<std_msgs::String>("commands", 1, &ExternalBehavior::command_cb, &test);
 
   web::json::value tasks;
@@ -331,6 +340,7 @@ int main(int argc, char** argv)
       {
         // std::cout << "Unlocking task: " << test.get_curr_task_ptr()->getTaskId() << std::endl;
         ROS_INFO_STREAM("Unlocking task: " << test.get_curr_task_ptr()->getTaskId().serialize());
+
         test.get_curr_task_ptr()->unlock();
         test.set_curr_task(nullptr);
       }

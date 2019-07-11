@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- <node pkg="living_storyboard" type="command_node" name="command_node" output="screen" /> -->
+    <node pkg="living_storyboard" type="external_behavior_node" name="message_node"
+            args="Message" output="screen">
+    </node>
+
+    <node pkg="living_storyboard" type="external_behavior_node" name="investigate_node"
+            args="Investigate" output="screen">
+    </node>
+
+    <node pkg="living_storyboard" type="external_behavior_node"  name="evacuate_node"
+            args="Evacuate" output="screen">
+    </node>
+
+    <node pkg="living_storyboard" type="external_behavior_node"  name="breach_search_node"
+            args="BreachSearch" output="screen">
+    </node>
+
+    <node pkg="living_storyboard" type="external_behavior_node"  name="monitor_security_node"
+            args="MonitorSecurity" output="screen">
+    </node>
+
+    <node pkg="living_storyboard" type="external_behavior_node"  name="patrol_node"
+            args="Patrol" output="screen">
+    </node>
+
+    <node pkg="living_storyboard" type="external_behavior_node"  name="follow_breach_node"
+            args="FollowBreach" output="screen">
+    </node>
+
+</launch>
