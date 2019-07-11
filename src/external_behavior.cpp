@@ -15,9 +15,9 @@ This is a ROS node class that provides just enough functionality to demo the BPM
 #include "ros/ros.h"
 #include "ros/console.h"
 
-std::string str_to_lower(std::string str);
+std::string              str_to_lower(std::string str);
 std::vector<std::string> split(std::string& str);
-camunda::Variables variables_from_vector(std::vector<std::string>& variables);
+camunda::Variables       variables_from_vector(const std::vector<std::string>& variables);
 
 ExternalBehavior::ExternalBehavior(const std::string& behavior, const std::string& uri, const uint32_t lock_duration)
   : m_client(uri),
@@ -32,31 +32,30 @@ ExternalBehavior::ExternalBehavior(const std::string& behavior, const std::strin
 
 void ExternalBehavior::command_cb(const std_msgs::String::ConstPtr& command_msg)
 {
-  std::string command_str = command_msg->data;
+  std::string              command_str = command_msg->data;
   std::vector<std::string> commands;
 
   commands = split(command_str);
-  if (commands.size() > 1)
+  if (!commands.empty())
   {
-    commands[0] = str_to_lower(commands[0]);
-    commands[1] = str_to_lower(commands[1]);
-    if (commands[0] == this->m_behavior_lower)
-    {
-      // std::cout << "The command matched the behavior!" << std::endl;
+    commands.at(0) = str_to_lower(commands.at(0));
+    commands.at(1) = str_to_lower(commands.at(1));
 
+    if (commands.at(0) == this->m_behavior_lower)
+    {
       if (commands.size() > 2){
         std::vector<std::string> vars(commands.begin() + 2, commands.end());
-        this->do_command(commands[1], vars);
+        this->do_command(commands.at(1), vars);
       }
       else
       {
-        this->do_command(commands[1]);
+        this->do_command(commands.at(1));
       }
     }
   }
 }
 
-void ExternalBehavior::do_command(const std::string& command, std::vector<std::string>& variables)
+void ExternalBehavior::do_command(const std::string& command, const std::vector<std::string>& variables)
 {
   camunda::Variables vars;
 
@@ -70,8 +69,7 @@ void ExternalBehavior::do_command(const std::string& command, std::vector<std::s
     try
     {
       std::string param = variables.at(0);
-      variables.erase(variables.begin());
-      vars = variables_from_vector(variables);
+      vars = variables_from_vector(std::vector<std::string>(variables.cbegin() + 1, variables.cend()));
       if (command == "error")
       {
         this->error(param, vars);
@@ -103,14 +101,7 @@ void ExternalBehavior::do_command(const std::string& command, std::vector<std::s
 
 }
 
-void ExternalBehavior::do_command(const std::string& command)
-{
-  std::vector<std::string> vars;
-  do_command(command, vars);
-}
-
-
-camunda::Variables variables_from_vector(std::vector<std::string>& variables)
+camunda::Variables variables_from_vector(const std::vector<std::string>& variables)
 {
   camunda::Variables result;
 
@@ -156,43 +147,19 @@ std::vector<std::string> split(std::string& str)
 
 const web::json::value ExternalBehavior::poll_tasks()
 {
-  std::stringstream ss;
+  web::http::http_response response;
+  std::stringstream        ss;
+
   ss << "external-task?topicName=" << this->m_behavior;
 
-  web::http::http_response response;
-  response = this->m_client.request(web::http::methods::GET, ss.str()).get();
+  this->m_client.request(web::http::methods::GET, ss.str())
+    .then([&response](const web::http::http_response& res)
+    {
+      response = res;
+    }).wait();
 
-  const web::json::value result(response.extract_json().get());
-  // for (size_t i = 0; i < result.size(); i++)
-  // {
-  //   std::cout << i << ": " << result.at(i) << std::endl;
-  // }
-
-
-  return result;
+  return response.extract_json().get();
 }
-
-// const camunda::LockResponse ExternalBehavior::get_task(uint32_t lock_duration)
-// {
-//   camunda::LockRequest request(this->m_worker_id, 1);
-//   camunda::Topics topics()
-//   web::http::http_response response;
-
-//   request.addTopics()
-//   response = this->m_client.request(web::http::methods::POST, "external-task/fetchAndLock", request.cgetLockRequested()).get();
-//   const camunda::LockResponse result;
-
-//   return result;
-// }
-
-// bool ExternalBehavior::new_task(const std::vector<web::json::value>& tasks)
-// {
-//   bool result = false;
-
-
-
-//   return result;
-// }
 
 bool ExternalBehavior::curr_task_canceled(const web::json::value curr_task_id)
 {
@@ -210,10 +177,8 @@ bool ExternalBehavior::curr_task_canceled(const web::json::value curr_task_id)
   }
   if (result)
   {
-    // std::cout << "Task Cancelled: " << curr_task_id << std::endl;
-    ROS_INFO_STREAM("Task canceled: " << curr_task_id);
+    std::cout << "Task Cancelled: " << curr_task_id << std::endl;
   }
-
 
   return result;
 }
@@ -222,46 +187,46 @@ bool ExternalBehavior::curr_task_canceled(const web::json::value curr_task_id)
 
 void ExternalBehavior::complete(const camunda::Variables& variables)
 {
-  // std::cout << "Completing " << this->m_behavior << " with variables:" << std::endl;
+  std::cout << "Completing " << this->m_behavior << " with variables:" << std::endl;
   variables.print();
-  // ROS_INFO_STREAM("Completing " << this->m_behavior << " with variables:\n" << variables.cget().serialize());
 
   camunda::CompleteRequest complete_request(this->m_worker_id, variables);
   complete_request.print();
-  (this->m_p_curr_task)->complete(complete_request);
+
+  this->getTaskLock()->complete(complete_request);
 }
 
 void ExternalBehavior::error(const std::string& message, const camunda::Variables& variables)
 {
-  // std::cout << "Sending Error with message: " << message << " and variables:" << std::endl;
-  // variables.print();
-  ROS_INFO_STREAM("Sending Error with message: " << message << " and variables:\n" << variables.cget().serialize());
+  std::cout << "Sending Error with message: " << message << " and variables:" << std::endl;
+  variables.print();
 
   this->m_error_handler.addExternalTaskId(this->m_p_curr_task->getTaskId().as_string());
+
   this->m_error_handler.throwBpmnError("error code", message, variables);
 }
 
 void ExternalBehavior::send_signal(const std::string& signal_name, const camunda::Variables& variables)
 {
-  // std::cout << "Sending signal " << signal_name << " with variables:" << std::endl;
-  // variables.print();
-  ROS_INFO_STREAM("Sending signal " << signal_name << " with variables:\n" << variables.cget().serialize());
+  std::cout << "Sending signal " << signal_name << " with variables:" << std::endl;
+  variables.print();
 
   camunda::ThrowSignal signal(signal_name, variables);
-  this->m_client.request(web::http::methods::POST, "signal", signal.getSignal()).wait();
+
+  this->m_client.request(web::http::methods::POST, "signal", signal.cgetSignal()).wait();
 }
 
 void ExternalBehavior::send_message(const std::string& message_name, const camunda::Variables& variables)
 {
-  // std::cout << "Sending message " << message_name << " with variables:" << std::endl;
-  // variables.print();
-  ROS_INFO_STREAM("Sending message " << message_name << " with variables:\n" << variables.cget().serialize());
+  std::cout << "Sending message " << message_name << " with variables:" << std::endl;
+  variables.print();
 
   camunda::Json message_json;
+
   message_json.add("messageName", web::json::value(message_name));
   message_json.add("processVariables", variables.cget());
 
-  this-m_client.request(web::http::methods::POST, "message", message_json.cget()).wait();
+  this->m_client.request(web::http::methods::POST, "message", message_json.cget()).wait();
 }
 
 
@@ -285,18 +250,9 @@ const std::unique_ptr<bpmn::TaskLock<>>& ExternalBehavior::get_curr_task_ptr()
   return this->m_p_curr_task;
 }
 
-
-
-void ExternalBehavior::set_curr_task(bpmn::TaskLock<>* task_ptr)
+std::unique_ptr<bpmn::TaskLock<>>& ExternalBehavior::getTaskLock()
 {
-  if (task_ptr == nullptr)
-  {
-    this->m_p_curr_task.reset();
-  }
-  else
-  {
-    this->m_p_curr_task.reset(task_ptr);
-  }
+  return this->m_p_curr_task;
 }
 
 int main(int argc, char** argv)
@@ -314,31 +270,19 @@ int main(int argc, char** argv)
     tasks = test.poll_tasks();
     if (tasks.size() > 0)
     {
-      test.set_curr_task(new bpmn::TaskLock<>("http://localhost:8080/", test.get_worker_id(), test.get_topics()));
-      // std::cout << "Got task: " << test.get_curr_task_ptr()->getTaskId() << " with variables:" << std::endl;
-      // camunda::Variables(test.get_curr_task_ptr()->getResponsVars()).print();
-      ROS_INFO_STREAM("Got task: "
-                      << test.get_curr_task_ptr()->getTaskId().serialize()
-                      << " with variables:\n"
-                      << test.get_curr_task_ptr()->getResponsVars().serialize());
+      test.getTaskLock().reset(new bpmn::TaskLock<>("http://localhost:8080/", test.get_worker_id(), test.get_topics()));
+
+      std::cout << "Got task: " << test.get_curr_task_ptr()->getTaskId() << " with variables:" << std::endl;
+      camunda::Variables(test.get_curr_task_ptr()->getResponsVars()).print();
+
       while (ros::ok() && !test.curr_task_canceled(test.get_curr_task_ptr()->getTaskId()))
       {
         ros::spinOnce();
         rate.sleep();
       }
 
-      if (!ros::ok())
-      {
-        // std::cout << "Unlocking task: " << test.get_curr_task_ptr()->getTaskId() << std::endl;
-        ROS_INFO_STREAM("Unlocking task: " << test.get_curr_task_ptr()->getTaskId().serialize());
-        test.get_curr_task_ptr()->unlock();
-        test.set_curr_task(nullptr);
-      }
-      else
-      {
-        test.set_curr_task(nullptr);
-      }
-
+      std::cout << "Unlocking task: " << test.get_curr_task_ptr()->getTaskId() << std::endl;
+      test.getTaskLock().reset();
     }
     ros::spinOnce();
     rate.sleep();
